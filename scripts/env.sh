@@ -36,7 +36,7 @@ build_docs(){
 case "$1" in
     "setup-env")
         setup_env
-        setup_docs_env
+        # setup_docs_env
         ;;
 
     "build-docs")
