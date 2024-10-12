@@ -9,8 +9,9 @@ import (
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
-
-	respBody := "Method was: " + method
+	path := r.URL.Path
+	respBody := "Method was: " + method + "\n"
+	respBody += "Path was: " + path
 	if strings.ToLower(method) == "post" {
 		defer r.Body.Close()
 		b, _ := io.ReadAll(r.Body)

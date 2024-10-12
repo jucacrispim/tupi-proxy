@@ -27,7 +27,7 @@ func TestHttpProxy(t *testing.T) {
 		{
 			"get request",
 			func() *http.Request {
-				r, _ := http.NewRequest("GET", "http://localhost:8080", nil)
+				r, _ := http.NewRequest("GET", "http://localhost:8080/the/path", nil)
 				return r
 			}(),
 			func(r *http.Response) {
@@ -37,7 +37,7 @@ func TestHttpProxy(t *testing.T) {
 				defer r.Body.Close()
 				b := make([]byte, r.ContentLength)
 				r.Body.Read(b)
-				if string(b) != "Method was: GET" {
+				if string(b) != "Method was: GET\nPath was: /the/path" {
 					t.Fatalf("Bad body %s", string(b))
 				}
 
@@ -56,7 +56,7 @@ func TestHttpProxy(t *testing.T) {
 				}
 				defer r.Body.Close()
 				b, _ := io.ReadAll(r.Body)
-				if string(b) != "Method was: POST\nBody was: The body" {
+				if string(b) != "Method was: POST\nPath was: /\nBody was: The body" {
 					t.Fatalf("Bad body %s", string(b))
 				}
 

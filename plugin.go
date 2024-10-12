@@ -52,8 +52,9 @@ func Init(domain string, conf *map[string]any) error {
 
 func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 	c := (*conf)
-	h := c["host"].(string)
+	h := c["host"].(string) + r.URL.Path
 	url, _ := url.Parse(h)
+
 	r.Host = url.Host
 	r.URL = url
 	r.RequestURI = ""
