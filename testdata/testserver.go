@@ -17,6 +17,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		respBody += "\nBody was: " + string(b)
 	}
+	w.Header().Set("A-CUSTOM", "THING")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(respBody))
 }

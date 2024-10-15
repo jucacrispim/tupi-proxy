@@ -66,6 +66,16 @@ func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 		return
 	}
 	defer resp.Body.Close()
+	for k, val := range resp.Header {
+		for _, v := range val {
+			w.Header().Add(k, v)
+		}
+	}
+
+	for _, c := range resp.Cookies() {
+		http.SetCookie(w, c)
+	}
+
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }

@@ -59,6 +59,9 @@ func TestHttpProxy(t *testing.T) {
 				if string(b) != "Method was: POST\nPath was: /\nBody was: The body" {
 					t.Fatalf("Bad body %s", string(b))
 				}
+				if r.Header.Get("A-CUSTOM") != "THING" {
+					t.Fatalf("bad header custom %s", r.Header.Get("A-CUSTOM"))
+				}
 
 			},
 		},

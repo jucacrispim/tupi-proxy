@@ -86,6 +86,29 @@ func (c *GoodClient) Do(r *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+type GoodClientWithHeaders struct{}
+
+func (c *GoodClientWithHeaders) Do(r *http.Request) (*http.Response, error) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader("something")),
+		Header:     http.Header{"A-CUSTOM": []string{"HEADER"}},
+	}
+	return resp, nil
+}
+
+type GoodClientWhitCookie struct{}
+
+func (c *GoodClientWhitCookie) Do(r *http.Request) (*http.Response, error) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader("something")),
+		Header:     r.Header,
+	}
+	resp.Header.Set("Set-Cookie", "someCookie=theval")
+	return resp, nil
+}
+
 func TestServe(t *testing.T) {
 	type validateFn func(w *httptest.ResponseRecorder)
 	var tests = []struct {
@@ -121,6 +144,49 @@ func TestServe(t *testing.T) {
 				b := string(w.Body.Bytes())
 				if b != "something" {
 					t.Fatalf("Bad body %s", b)
+				}
+			},
+		},
+		{
+			"request ok with headers",
+			func() *http.Request {
+				r, _ := http.NewRequest("GET", "/bla/x", nil)
+				return r
+			}(),
+			&GoodClientWithHeaders{},
+			func(w *httptest.ResponseRecorder) {
+				if w.Code != http.StatusOK {
+					t.Fatalf("Invalid status code %d", w.Code)
+				}
+				b := string(w.Body.Bytes())
+				if b != "something" {
+					t.Fatalf("Bad body %s", b)
+				}
+				h := w.Header().Get("A-CUSTOM")
+				if h != "HEADER" {
+					t.Fatalf("bad header %s", h)
+				}
+			},
+		},
+		{
+			"request ok with cookies",
+			func() *http.Request {
+				r, _ := http.NewRequest("GET", "/bla/x", nil)
+				return r
+			}(),
+			&GoodClientWhitCookie{},
+			func(w *httptest.ResponseRecorder) {
+				if w.Code != http.StatusOK {
+					t.Fatalf("Invalid status code %d", w.Code)
+				}
+				b := string(w.Body.Bytes())
+				if b != "something" {
+					t.Fatalf("Bad body %s", b)
+				}
+				c := w.Result().Cookies()[0]
+
+				if c.Value != "theval" {
+					t.Fatalf("bad cookie %s", c.Value)
 				}
 			},
 		},
