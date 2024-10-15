@@ -28,6 +28,7 @@ import (
 var MissingConfigError error = errors.New("[tupi-proxy] Missing config")
 var NoHostError error = errors.New("[tupi-proxy] Missing host config")
 var BadHostError error = errors.New("[tupi-proxy] Bad host config")
+var BadPreserveHost error = errors.New("[tupi-proxy] Bad preserve host")
 
 func Init(domain string, conf *map[string]any) error {
 	c := (*conf)
@@ -39,6 +40,7 @@ func Init(domain string, conf *map[string]any) error {
 	if !exists {
 		return NoHostError
 	}
+
 	_, ok := h.(string)
 	if !ok {
 		return BadHostError
@@ -47,6 +49,15 @@ func Init(domain string, conf *map[string]any) error {
 	if err != nil {
 		return BadHostError
 	}
+
+	if p, exists := c["preserveHost"]; exists {
+		_, ok := p.(bool)
+		if !ok {
+			return BadPreserveHost
+		}
+
+	}
+
 	return nil
 }
 
@@ -54,8 +65,15 @@ func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 	c := (*conf)
 	h := c["host"].(string) + r.URL.Path
 	url, _ := url.Parse(h)
-
+	origHost := r.Host
 	r.Host = url.Host
+	if preserve, exists := c["preserveHost"]; exists {
+		p := preserve.(bool)
+		if p {
+			r.Host = origHost
+		}
+
+	}
 	r.URL = url
 	r.RequestURI = ""
 	client := getHttpClient()

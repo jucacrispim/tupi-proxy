@@ -58,6 +58,16 @@ func TestInit(t *testing.T) {
 			map[string]any{"host": "http://host.bla"},
 			nil,
 		},
+		{
+			"bad preserve host",
+			map[string]any{"host": "http://host.bla", "preserveHost": "x"},
+			BadPreserveHost,
+		},
+		{
+			"ok preserve host",
+			map[string]any{"host": "http://host.bla", "preserveHost": true},
+			nil,
+		},
 	}
 
 	for _, test := range tests {
@@ -200,7 +210,8 @@ func TestServe(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testClient = test.client
 			w := httptest.NewRecorder()
-			conf := map[string]any{"host": "http://localhost:8080"}
+			conf := map[string]any{"host": "http://localhost:8080",
+				"preserveHost": true}
 			Serve(w, test.r, &conf)
 			test.validate(w)
 		})

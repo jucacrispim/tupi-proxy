@@ -31,3 +31,15 @@ ServePluginConf = {
 }
 ...
 ```
+
+To preserve the original host in the proxy request use:
+
+```toml
+...
+ServePlugin = "/path/to/proxy_plugin.so"
+ServePluginConf = {
+    "host" = "http://some.where:8901"
+	"preserveHost" = true
+}
+...
+```
