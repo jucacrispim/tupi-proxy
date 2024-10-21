@@ -19,9 +19,8 @@ package main
 
 import (
 	"errors"
-	"io"
-	"log"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 )
 
@@ -63,51 +62,44 @@ func Init(domain string, conf *map[string]any) error {
 
 func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 	c := (*conf)
-	h := c["host"].(string) + r.URL.Path
-	url, _ := url.Parse(h)
+	bh := c["host"].(string)
+	baseURL, _ := url.Parse(bh)
 	origHost := r.Host
-	r.Host = url.Host
+	host := ""
 	if preserve, exists := c["preserveHost"]; exists {
 		p := preserve.(bool)
 		if p {
-			r.Host = origHost
-		}
-
-	}
-	r.URL = url
-	r.RequestURI = ""
-	client := getHttpClient()
-	resp, err := client.Do(r)
-	if err != nil {
-		log.Printf(err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-	for k, val := range resp.Header {
-		for _, v := range val {
-			w.Header().Add(k, v)
+			host = origHost
+		} else {
+			host = baseURL.Host
 		}
 	}
 
-	for _, c := range resp.Cookies() {
-		http.SetCookie(w, c)
-	}
-
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	proxy := getHttpProxy(baseURL, host)
+	proxy.ServeHTTP(w, r)
 }
 
-type httpClient interface {
-	Do(*http.Request) (*http.Response, error)
+func rewriteRequest(req *httputil.ProxyRequest, url *url.URL, host string) {
+	req.SetURL(url)
+	req.Out.Host = host
 }
 
-var testClient httpClient = nil
+// for tests
+type httpProxy interface {
+	ServeHTTP(w http.ResponseWriter, r *http.Request)
+}
 
-func getHttpClient() httpClient {
+var testProxy func(url *url.URL, host string) httpProxy
+
+func getHttpProxy(url *url.URL, host string) httpProxy {
 	// notest
-	if testClient != nil {
-		return testClient
+	if testProxy != nil {
+		return testProxy(url, host)
 	}
-	return &http.Client{}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(req *httputil.ProxyRequest) {
+			rewriteRequest(req, url, host)
+		},
+	}
+	return proxy
 }

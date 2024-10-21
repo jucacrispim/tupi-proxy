@@ -19,9 +19,10 @@ package main
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -80,140 +81,68 @@ func TestInit(t *testing.T) {
 	}
 }
 
-type BadClient struct{}
-
-func (c *BadClient) Do(r *http.Request) (*http.Response, error) {
-	return nil, errors.New("some error")
+type myProxy struct {
+	url  *url.URL
+	host string
+	pr   *httputil.ProxyRequest
 }
 
-type GoodClient struct{}
-
-func (c *GoodClient) Do(r *http.Request) (*http.Response, error) {
-	resp := &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader("something")),
-	}
-	return resp, nil
+func (p *myProxy) Rewrite(r *httputil.ProxyRequest) {
+	rewriteRequest(r, p.url, p.host)
 }
 
-type GoodClientWithHeaders struct{}
-
-func (c *GoodClientWithHeaders) Do(r *http.Request) (*http.Response, error) {
-	resp := &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader("something")),
-		Header:     http.Header{"A-CUSTOM": []string{"HEADER"}},
+func (p *myProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	outreq := r.Clone(ctx)
+	pr := &httputil.ProxyRequest{
+		In:  r,
+		Out: outreq,
 	}
-	return resp, nil
-}
-
-type GoodClientWhitCookie struct{}
-
-func (c *GoodClientWhitCookie) Do(r *http.Request) (*http.Response, error) {
-	resp := &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(strings.NewReader("something")),
-		Header:     r.Header,
-	}
-	resp.Header.Set("Set-Cookie", "someCookie=theval")
-	return resp, nil
+	p.Rewrite(pr)
+	p.pr = pr
 }
 
 func TestServe(t *testing.T) {
 	type validateFn func(w *httptest.ResponseRecorder)
 	var tests = []struct {
-		name     string
-		r        *http.Request
-		client   httpClient
-		validate validateFn
+		name string
+		conf map[string]any
 	}{
 		{
-			"bad request to host",
-			func() *http.Request {
-				r, _ := http.NewRequest("GET", "/bla/x", nil)
-				return r
-			}(),
-			&BadClient{},
-			func(w *httptest.ResponseRecorder) {
-				if w.Code != http.StatusInternalServerError {
-					t.Fatalf("Invalid status code %d", w.Code)
-				}
-			},
+			"request preserve root",
+			map[string]any{"host": "http://localhost:8000", "preserveHost": true},
 		},
 		{
-			"request ok",
-			func() *http.Request {
-				r, _ := http.NewRequest("GET", "/bla/x", nil)
-				return r
-			}(),
-			&GoodClient{},
-			func(w *httptest.ResponseRecorder) {
-				if w.Code != http.StatusOK {
-					t.Fatalf("Invalid status code %d", w.Code)
-				}
-				b := string(w.Body.Bytes())
-				if b != "something" {
-					t.Fatalf("Bad body %s", b)
-				}
-			},
-		},
-		{
-			"request ok with headers",
-			func() *http.Request {
-				r, _ := http.NewRequest("GET", "/bla/x", nil)
-				return r
-			}(),
-			&GoodClientWithHeaders{},
-			func(w *httptest.ResponseRecorder) {
-				if w.Code != http.StatusOK {
-					t.Fatalf("Invalid status code %d", w.Code)
-				}
-				b := string(w.Body.Bytes())
-				if b != "something" {
-					t.Fatalf("Bad body %s", b)
-				}
-				h := w.Header().Get("A-CUSTOM")
-				if h != "HEADER" {
-					t.Fatalf("bad header %s", h)
-				}
-			},
-		},
-		{
-			"request ok with cookies",
-			func() *http.Request {
-				r, _ := http.NewRequest("GET", "/bla/x", nil)
-				return r
-			}(),
-			&GoodClientWhitCookie{},
-			func(w *httptest.ResponseRecorder) {
-				if w.Code != http.StatusOK {
-					t.Fatalf("Invalid status code %d", w.Code)
-				}
-				b := string(w.Body.Bytes())
-				if b != "something" {
-					t.Fatalf("Bad body %s", b)
-				}
-				c := w.Result().Cookies()[0]
-
-				if c.Value != "theval" {
-					t.Fatalf("bad cookie %s", c.Value)
-				}
-			},
+			"request don't preserve root",
+			map[string]any{"host": "http://localhost:8000", "preserveHost": false},
 		},
 	}
 
 	defer func() {
-		testClient = nil
+		testProxy = nil
 	}()
 
 	for _, test := range tests {
+		var p *myProxy
 		t.Run(test.name, func(t *testing.T) {
-			testClient = test.client
+			testProxy = func(url *url.URL, host string) httpProxy {
+				p = &myProxy{
+					url:  url,
+					host: host,
+				}
+				return p
+			}
 			w := httptest.NewRecorder()
-			conf := map[string]any{"host": "http://localhost:8080",
-				"preserveHost": true}
-			Serve(w, test.r, &conf)
-			test.validate(w)
+			r, _ := http.NewRequest("GET", "/", nil)
+			r.Host = "https://the.site.net"
+			conf := test.conf
+			Serve(w, r, &conf)
+
+			outhost := p.pr.Out.Host
+			if conf["preserveHost"].(bool) && strings.Index(outhost, "localhost") >= 0 {
+				t.Fatalf("bad preserve host %s", outhost)
+
+			}
 		})
 	}
 }
