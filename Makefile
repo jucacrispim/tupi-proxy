@@ -17,6 +17,9 @@ TESTDATA_DIR=./testdata
 PROXY_FILE=$(TESTDATA_DIR)/testserver.go
 PROXY_BIN=$(BUILD_DIR)/testserver
 
+WSPROXY_FILE=$(TESTDATA_DIR)/testwsserver.go
+WSPROXY_BIN=$(BUILD_DIR)/testwsserver
+
 
 .PHONY: build # - Creates the binary under the build/ directory
 build: buildplugin
@@ -29,6 +32,7 @@ buildplugin: buildproxy
 .PHONY: buildproxy # - Builds the proxy bin for tests
 buildproxy:
 	$(GOBUILD) -o $(PROXY_BIN) $(PROXY_FILE)
+	$(GOBUILD) -o $(WSPROXY_BIN) $(WSPROXY_FILE)
 
 .PHONY: test # - Run all tests
 test: buildproxy

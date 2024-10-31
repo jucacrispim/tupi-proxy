@@ -18,7 +18,11 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -28,7 +32,6 @@ import (
 )
 
 func TestInit(t *testing.T) {
-
 	var tests = []struct {
 		name string
 		conf map[string]any
@@ -102,6 +105,69 @@ func (p *myProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.pr = pr
 }
 
+type bufferConn struct {
+	net.TCPConn
+	b bytes.Buffer
+}
+
+func (bc *bufferConn) Read(b []byte) (int, error) {
+	return bc.b.Read(b)
+}
+
+func (bc *bufferConn) Write(b []byte) (int, error) {
+	return bc.b.Write(b)
+}
+
+func (bc *bufferConn) WriteTo(w io.Writer) (n int64, err error) {
+	total := 0
+	for {
+		var b = make([]byte, 10)
+		r, err := bc.Read(b)
+		if err != nil {
+			return int64(total), err
+		}
+		if r > 0 {
+			w.Write(b)
+			total += r
+		}
+	}
+}
+
+type myHijacker struct {
+	httptest.ResponseRecorder
+	inConn    net.Conn
+	destConn  net.Conn
+	withError bool
+}
+
+func (h *myHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h.withError {
+		return nil, nil, errors.New("Bad hijack")
+	}
+	return h.inConn, nil, nil
+}
+
+func newHijacker(withError bool) *myHijacker {
+	var b []byte
+	buff := bytes.NewBuffer(b)
+	destConn := bufferConn{
+		TCPConn: net.TCPConn{},
+		b:       *buff,
+	}
+	var ib []byte
+	inbuff := bytes.NewBuffer(ib)
+	inConn := bufferConn{
+		TCPConn: net.TCPConn{},
+		b:       *inbuff,
+	}
+	return &myHijacker{
+		ResponseRecorder: *httptest.NewRecorder(),
+		inConn:           &inConn,
+		destConn:         &destConn,
+		withError:        withError,
+	}
+}
+
 func TestServe(t *testing.T) {
 	type validateFn func(w *httptest.ResponseRecorder)
 	var tests = []struct {
@@ -142,6 +208,171 @@ func TestServe(t *testing.T) {
 			if conf["preserveHost"].(bool) && strings.Index(outhost, "localhost") >= 0 {
 				t.Fatalf("bad preserve host %s", outhost)
 
+			}
+		})
+	}
+}
+
+func TestServeWS(t *testing.T) {
+
+	defer func() {
+		testDial = nil
+	}()
+
+	type validateFn func(http.ResponseWriter)
+
+	var tests = []struct {
+		name     string
+		writerFn func() http.ResponseWriter
+		conf     map[string]any
+		validate validateFn
+		serveFn  func(w http.ResponseWriter, r *http.Request, c *map[string]any)
+	}{
+		{
+			"test writer not hijacker",
+			func() http.ResponseWriter { return httptest.NewRecorder() },
+			map[string]any{"host": "http://my-host.nada"},
+			func(w http.ResponseWriter) {
+				tw := w.(*httptest.ResponseRecorder)
+				if tw.Code != 500 {
+					t.Fatalf("Bad code %d", tw.Code)
+				}
+			},
+			Serve,
+		},
+		{
+			"test bad hijack",
+			func() http.ResponseWriter { return newHijacker(true) },
+			map[string]any{"host": ""},
+			func(w http.ResponseWriter) {
+				tw := w.(*myHijacker)
+				if tw.Code != 500 {
+					t.Fatalf("bad code %d", tw.Code)
+				}
+			},
+			Serve,
+		},
+		{
+			"test bad dial",
+			func() http.ResponseWriter {
+				h := newHijacker(false)
+				testDial = func(n, a string) (net.Conn, error) {
+					return nil, errors.New("Bad dial")
+				}
+				return h
+			},
+			map[string]any{"host": "http://nada.bla"},
+			func(w http.ResponseWriter) {
+				tw := w.(*myHijacker)
+				if tw.Code != 500 {
+					t.Fatalf("bad code %d", tw.Code)
+				}
+			},
+			Serve,
+		},
+		{
+			"test ok",
+			func() http.ResponseWriter {
+				h := newHijacker(false)
+				testDial = func(n, a string) (net.Conn, error) {
+					return h.destConn, nil
+				}
+				return h
+			},
+			map[string]any{"host": "http://localhost"},
+			func(w http.ResponseWriter) {
+				tw := w.(*myHijacker)
+				var r []byte
+
+				for {
+					r, _ = io.ReadAll(tw.destConn)
+					if len(r) >= 1 {
+						break
+					}
+				}
+				tw.inConn.Write([]byte("ping"))
+				// tw.inConn.(*bufferConn).WriteTo(tw.destConn)
+				a, _ := io.ReadAll(tw.destConn)
+				println(string(a))
+
+				// if string(r) != "ping" {
+				// 	t.Fatalf("bad in -> dest: %s", string(r))
+				// }
+				tw.destConn.Close()
+				tw.inConn.Close()
+			},
+			func(w http.ResponseWriter, r *http.Request, c *map[string]any) {
+				go Serve(w, r, c)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r, _ := http.NewRequest("GET", "/", nil)
+			r.Header.Set("Connection", "upgrade")
+			r.Header.Set("Upgrade", "websocket")
+			writer := test.writerFn()
+			test.serveFn(writer, r, &test.conf)
+			test.validate(writer)
+		})
+	}
+}
+
+func TestGetHostPort(t *testing.T) {
+	var tests = []struct {
+		name         string
+		url          *url.URL
+		expectedAddr string
+		err          error
+	}{
+		{
+			"url with host and port",
+			func() *url.URL {
+				u, _ := url.Parse("ws://localhost:8080")
+				return u
+			}(),
+			"localhost:8080",
+			nil,
+		},
+		{
+			"ws url",
+			func() *url.URL {
+				u, _ := url.Parse("ws://localhost")
+				return u
+			}(),
+			"localhost:80",
+			nil,
+		},
+		{
+			"wss url",
+			func() *url.URL {
+				u, _ := url.Parse("wss://localhost")
+				return u
+			}(),
+			"localhost:443",
+			nil,
+		},
+		{
+			"bad scheme",
+			func() *url.URL {
+				u, _ := url.Parse("wxs://localhost")
+				return u
+			}(),
+			"",
+			InvalidScheme,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r, err := getHostPort(test.url)
+			if err != nil && !errors.Is(err, test.err) {
+				t.Fatalf("Bad err %s", err.Error())
+			}
+
+			if r != test.expectedAddr {
+				t.Fatalf("bad addr %s", r)
 			}
 		})
 	}

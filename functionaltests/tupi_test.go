@@ -81,6 +81,51 @@ func TestHttpProxy(t *testing.T) {
 	}
 }
 
+func TestWSProxy(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	type validateResponse func(*http.Response)
+
+	startWSServer()
+	defer stopWSServer()
+
+	client, err := NewWebSocketClient("ws://localhost:8080")
+	if err != nil {
+		t.Fatalf("error creating websocket client %s", err.Error())
+	}
+
+	err = client.Handshake()
+	if err != nil {
+		t.Fatalf("error handshake %s", err.Error())
+	}
+
+	msg := "testing ws"
+	fr := Frame{
+		Payload: []byte(msg),
+		IsFinal: true,
+		Opcode:  OpcodeText,
+	}
+	err = client.Send(&fr)
+	if err != nil {
+		t.Fatalf("error sending msg %s", err.Error())
+	}
+
+	rfr, err := client.Recv()
+	if err != nil {
+		t.Fatalf("error recv %s", err.Error())
+	}
+
+	if rfr.Opcode != OpcodeText {
+		t.Fatalf("bad opcode %b", rfr.Opcode)
+	}
+	if string(rfr.Payload) != msg {
+		t.Fatalf("bad response %s", string(rfr.Payload))
+	}
+
+}
+
 func startServer() {
 	cmd := exec.Command("./../build/testserver")
 	if cmd.Err != nil {
@@ -104,5 +149,31 @@ func startServer() {
 
 func stopServer() {
 	exec.Command("killall", "testserver")
+	exec.Command("killall", "tupi")
+}
+
+func startWSServer() {
+	cmd := exec.Command("./../build/testwsserver", "-server")
+	if cmd.Err != nil {
+		panic(cmd.Err.Error())
+	}
+	err := cmd.Start()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	cmd = exec.Command("tupi", "-conf", "./../testdata/tupi-func.conf")
+	if cmd.Err != nil {
+		panic(cmd.Err.Error())
+	}
+	err = cmd.Start()
+	if err != nil {
+		panic(err.Error())
+	}
+	time.Sleep(time.Millisecond * 200)
+}
+
+func stopWSServer() {
+	exec.Command("killall", "testwsserver")
 	exec.Command("killall", "tupi")
 }

@@ -19,15 +19,80 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 )
 
 var MissingConfigError error = errors.New("[tupi-proxy] Missing config")
 var NoHostError error = errors.New("[tupi-proxy] Missing host config")
 var BadHostError error = errors.New("[tupi-proxy] Bad host config")
 var BadPreserveHost error = errors.New("[tupi-proxy] Bad preserve host")
+var InvalidScheme error = errors.New("Invalid scheme")
+
+type wsProxy struct {
+	destHost   string
+	headerHost string
+}
+
+func (p *wsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Println("ResponseWriter not Hijacker")
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
+	wsDest := strings.Replace(p.destHost, "http", "ws", 1)
+	destURL := wsDest + r.URL.Path
+	dest, _ := url.Parse(destURL)
+
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Println("Error hijacking")
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
+	defer conn.Close()
+	outReq := r.Clone(r.Context())
+	outReq.URL = dest
+	outReq.Host = p.headerHost
+
+	addr, _ := getHostPort(outReq.URL)
+	destConn, err := dial("tcp", addr)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Println(fmt.Sprintf("Error remote write: %s", err.Error()))
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
+
+	defer destConn.Close()
+	errCh := make(chan error, 2)
+	copyIO := func(dest net.Conn, source net.Conn) {
+		_, err := io.Copy(dest, source)
+		if err != nil {
+			log.Println(fmt.Sprintf("ws error: %s", err.Error()))
+			errCh <- err
+		}
+	}
+
+	outReq.Write(destConn)
+	go copyIO(conn, destConn)
+	go copyIO(destConn, conn)
+
+	select {
+	case <-errCh:
+		log.Println("Closing ws conns")
+	}
+
+}
 
 func Init(domain string, conf *map[string]any) error {
 	c := (*conf)
@@ -63,7 +128,7 @@ func Init(domain string, conf *map[string]any) error {
 func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 	c := (*conf)
 	bh := c["host"].(string)
-	baseURL, _ := url.Parse(bh)
+	destBaseURL, _ := url.Parse(bh)
 	origHost := r.Host
 	host := ""
 	if preserve, exists := c["preserveHost"]; exists {
@@ -71,11 +136,16 @@ func Serve(w http.ResponseWriter, r *http.Request, conf *map[string]any) {
 		if p {
 			host = origHost
 		} else {
-			host = baseURL.Host
+			host = destBaseURL.Host
 		}
 	}
 
-	proxy := getHttpProxy(baseURL, host)
+	var proxy httpProxy
+	if !isWebSocket(r) {
+		proxy = getHttpProxy(destBaseURL, host)
+	} else {
+		proxy = getWsProxy(destBaseURL, host)
+	}
 	proxy.ServeHTTP(w, r)
 }
 
@@ -84,12 +154,39 @@ func rewriteRequest(req *httputil.ProxyRequest, url *url.URL, host string) {
 	req.Out.Host = host
 }
 
+func isWebSocket(r *http.Request) bool {
+	isUpgrade := strings.ToLower(r.Header.Get("Connection")) == "upgrade"
+	isWs := strings.ToLower(r.Header.Get("Upgrade")) == "websocket"
+
+	return isUpgrade && isWs
+}
+
+func getHostPort(u *url.URL) (string, error) {
+	hostname := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "ws":
+			port = "80"
+
+		case "wss":
+			port = "443"
+
+		default:
+			return "", InvalidScheme
+
+		}
+	}
+	return fmt.Sprintf("%s:%s", hostname, port), nil
+}
+
 // for tests
 type httpProxy interface {
 	ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 var testProxy func(url *url.URL, host string) httpProxy
+var testConn net.Conn
 
 func getHttpProxy(url *url.URL, host string) httpProxy {
 	// notest
@@ -102,4 +199,25 @@ func getHttpProxy(url *url.URL, host string) httpProxy {
 		},
 	}
 	return proxy
+}
+
+func getWsProxy(url *url.URL, host string) httpProxy {
+	// notest
+	if testProxy != nil {
+		return testProxy(url, host)
+	}
+	return &wsProxy{
+		destHost:   url.String(),
+		headerHost: host,
+	}
+}
+
+var testDial func(n, a string) (net.Conn, error)
+
+func dial(n, a string) (net.Conn, error) {
+	// notest
+	if testDial != nil {
+		return testDial(n, a)
+	}
+	return net.Dial(n, a)
 }
