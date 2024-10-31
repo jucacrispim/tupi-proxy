@@ -148,8 +148,8 @@ func startServer() {
 }
 
 func stopServer() {
-	exec.Command("killall", "testserver")
-	exec.Command("killall", "tupi")
+	exec.Command("killall", "testserver").Run()
+	exec.Command("killall", "tupi").Run()
 }
 
 func startWSServer() {
@@ -174,6 +174,6 @@ func startWSServer() {
 }
 
 func stopWSServer() {
-	exec.Command("killall", "testwsserver")
-	exec.Command("killall", "tupi")
+	exec.Command("killall", "testwsserver").Run()
+	exec.Command("killall", "tupi").Run()
 }
