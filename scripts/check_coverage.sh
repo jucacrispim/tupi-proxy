@@ -5,7 +5,7 @@ if [ "$ENV" == "ci" ]
 then
    courtney_cmd=~/go/bin/courtney
 fi
-out=`$courtney_cmd -e -v -t ./... -t -trimpath -t -short`
+out=`$courtney_cmd -e -v -t ./.. -t -trimpath -t -short`
 error=$?
 
 if [ "$error" != "0" ]
