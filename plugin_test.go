@@ -287,17 +287,13 @@ func TestServeWS(t *testing.T) {
 				for {
 					r, _ = io.ReadAll(tw.destConn)
 					if len(r) >= 1 {
+						if strings.Index(string(r), "Upgrade: websocket") < 0 {
+							t.Fatalf("Bad headers")
+						}
 						break
 					}
 				}
-				tw.inConn.Write([]byte("ping"))
-				// tw.inConn.(*bufferConn).WriteTo(tw.destConn)
-				a, _ := io.ReadAll(tw.destConn)
-				println(string(a))
 
-				// if string(r) != "ping" {
-				// 	t.Fatalf("bad in -> dest: %s", string(r))
-				// }
 				tw.destConn.Close()
 				tw.inConn.Close()
 			},
