@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	OpcodeText   = 0x00
-	OpcodeBinary = 0x01
+	OpcodeCont   = 0x00
+	OpcodeText   = 0x01
+	OpcodeBinary = 0x02
 	OpcodeClose  = 0x08
 	OpcodePing   = 0x09
 	OpcodePong   = 0x0A
@@ -177,6 +178,15 @@ func (ws *WebSocket) WireDecode() (*Frame, error) {
 	return &fr, nil
 }
 
+type bufferedReaderConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedReaderConn) Read(b []byte) (int, error) {
+	return c.reader.Read(b)
+}
+
 type WebSocketClient struct {
 	WebSocket
 	Url *url.URL
@@ -210,6 +220,9 @@ func (ws *WebSocketClient) Handshake() error {
 		strings.ToLower(resp.Header.Get("Connection")) != "upgrade" {
 		return errors.New("Invalid response")
 	}
+
+	// the response read may have buffered the first frames, keep reading from it
+	ws.Conn = &bufferedReaderConn{Conn: ws.Conn, reader: reader}
 	return nil
 }
 
