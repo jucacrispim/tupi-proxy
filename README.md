@@ -1,4 +1,4 @@
-tupi-proxy is a plugin for Tupi.
+Tupi proxy is a plugin for Tupi.
 
 Install
 =======
