@@ -49,7 +49,7 @@ func (p *wsProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wsDest := strings.Replace(p.destHost, "http", "ws", 1)
-	destURL := wsDest + r.URL.Path
+	destURL := wsDest + r.URL.RequestURI()
 	dest, _ := url.Parse(destURL)
 
 	conn, _, err := hijacker.Hijack()

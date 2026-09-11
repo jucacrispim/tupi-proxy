@@ -73,6 +73,19 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// send back the request uri so tests can check the proxy kept the query
+	uri := functionaltests.Frame{
+		Payload: []byte(r.URL.RequestURI()),
+		IsFinal: true,
+		Opcode:  functionaltests.OpcodeText,
+	}
+	err = ws.Send(&uri)
+	if err != nil {
+		log.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	err = ws.Echo()
 	if err != nil {
 		log.Println(err.Error())

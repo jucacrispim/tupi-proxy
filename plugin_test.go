@@ -290,6 +290,9 @@ func TestServeWS(t *testing.T) {
 						if strings.Index(string(r), "Upgrade: websocket") < 0 {
 							t.Fatalf("Bad headers")
 						}
+						if strings.Index(string(r), "?repo_name=someguy/repo-bla") < 0 {
+							t.Fatalf("Query string not preserved")
+						}
 						break
 					}
 				}
@@ -305,7 +308,7 @@ func TestServeWS(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			r, _ := http.NewRequest("GET", "/", nil)
+			r, _ := http.NewRequest("GET", "/api/socks/waterfall-info?repo_name=someguy/repo-bla", nil)
 			r.Header.Set("Connection", "upgrade")
 			r.Header.Set("Upgrade", "websocket")
 			writer := test.writerFn()

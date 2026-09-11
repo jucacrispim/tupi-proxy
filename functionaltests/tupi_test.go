@@ -27,7 +27,7 @@ func TestHttpProxy(t *testing.T) {
 		{
 			"get request",
 			func() *http.Request {
-				r, _ := http.NewRequest("GET", "http://localhost:8080/the/path", nil)
+				r, _ := http.NewRequest("GET", "http://localhost:18080/the/path", nil)
 				return r
 			}(),
 			func(r *http.Response) {
@@ -46,7 +46,7 @@ func TestHttpProxy(t *testing.T) {
 		{
 			"post request",
 			func() *http.Request {
-				r, _ := http.NewRequest("POST", "http://localhost:8080",
+				r, _ := http.NewRequest("POST", "http://localhost:18080",
 					io.NopCloser(strings.NewReader("The body")))
 				return r
 			}(),
@@ -91,7 +91,8 @@ func TestWSProxy(t *testing.T) {
 	startWSServer()
 	defer stopWSServer()
 
-	client, err := NewWebSocketClient("ws://localhost:8080")
+	path := "/api/socks/waterfall-info?repo_name=someguy/repo-bla"
+	client, err := NewWebSocketClient("ws://localhost:18080" + path)
 	if err != nil {
 		t.Fatalf("error creating websocket client %s", err.Error())
 	}
@@ -99,6 +100,14 @@ func TestWSProxy(t *testing.T) {
 	err = client.Handshake()
 	if err != nil {
 		t.Fatalf("error handshake %s", err.Error())
+	}
+
+	urifr, err := client.Recv()
+	if err != nil {
+		t.Fatalf("error recv uri %s", err.Error())
+	}
+	if string(urifr.Payload) != path {
+		t.Fatalf("proxy dropped the query string: %s", string(urifr.Payload))
 	}
 
 	msg := "testing ws"
