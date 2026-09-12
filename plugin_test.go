@@ -28,7 +28,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestInit(t *testing.T) {
@@ -107,30 +109,33 @@ func (p *myProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type bufferConn struct {
 	net.TCPConn
-	b bytes.Buffer
+	mu   sync.Mutex
+	rbuf bytes.Buffer
+	wbuf bytes.Buffer
 }
 
+// Read reads from the read-side buffer. It returns io.EOF when there is no
+// pending data, so reads never consume what was written to the conn.
 func (bc *bufferConn) Read(b []byte) (int, error) {
-	return bc.b.Read(b)
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if bc.rbuf.Len() == 0 {
+		return 0, io.EOF
+	}
+	return bc.rbuf.Read(b)
 }
 
 func (bc *bufferConn) Write(b []byte) (int, error) {
-	return bc.b.Write(b)
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.wbuf.Write(b)
 }
 
-func (bc *bufferConn) WriteTo(w io.Writer) (n int64, err error) {
-	total := 0
-	for {
-		var b = make([]byte, 10)
-		r, err := bc.Read(b)
-		if err != nil {
-			return int64(total), err
-		}
-		if r > 0 {
-			w.Write(b)
-			total += r
-		}
-	}
+// Written returns a copy of everything written to the conn.
+func (bc *bufferConn) Written() []byte {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return append([]byte(nil), bc.wbuf.Bytes()...)
 }
 
 type myHijacker struct {
@@ -148,17 +153,11 @@ func (h *myHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func newHijacker(withError bool) *myHijacker {
-	var b []byte
-	buff := bytes.NewBuffer(b)
 	destConn := bufferConn{
 		TCPConn: net.TCPConn{},
-		b:       *buff,
 	}
-	var ib []byte
-	inbuff := bytes.NewBuffer(ib)
 	inConn := bufferConn{
 		TCPConn: net.TCPConn{},
-		b:       *inbuff,
 	}
 	return &myHijacker{
 		ResponseRecorder: *httptest.NewRecorder(),
@@ -282,19 +281,22 @@ func TestServeWS(t *testing.T) {
 			map[string]any{"host": "http://localhost"},
 			func(w http.ResponseWriter) {
 				tw := w.(*myHijacker)
-				var r []byte
+				dc := tw.destConn.(*bufferConn)
 
-				for {
-					r, _ = io.ReadAll(tw.destConn)
+				var r []byte
+				for i := 0; i < 100; i++ {
+					r = dc.Written()
 					if len(r) >= 1 {
-						if strings.Index(string(r), "Upgrade: websocket") < 0 {
-							t.Fatalf("Bad headers")
-						}
-						if strings.Index(string(r), "?repo_name=someguy/repo-bla") < 0 {
-							t.Fatalf("Query string not preserved")
-						}
 						break
 					}
+					time.Sleep(time.Millisecond * 10)
+				}
+
+				if strings.Index(string(r), "Upgrade: websocket") < 0 {
+					t.Fatalf("Bad headers")
+				}
+				if strings.Index(string(r), "?repo_name=someguy/repo-bla") < 0 {
+					t.Fatalf("Query string not preserved")
 				}
 
 				tw.destConn.Close()

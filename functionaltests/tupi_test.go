@@ -135,8 +135,11 @@ func TestWSProxy(t *testing.T) {
 
 }
 
-func startServer() {
-	cmd := exec.Command("./../build/testserver")
+var serverCmd *exec.Cmd
+var tupiCmd *exec.Cmd
+
+func startProc(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
 	if cmd.Err != nil {
 		panic(cmd.Err.Error())
 	}
@@ -144,45 +147,39 @@ func startServer() {
 	if err != nil {
 		panic(err.Error())
 	}
+	return cmd
+}
 
-	cmd = exec.Command("tupi", "-conf", "./../testdata/tupi-func.conf")
-	if cmd.Err != nil {
-		panic(cmd.Err.Error())
+func stopProc(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
 	}
-	err = cmd.Start()
-	if err != nil {
-		panic(err.Error())
-	}
+	cmd.Process.Kill()
+	cmd.Wait()
+}
+
+func startServer() {
+	serverCmd = startProc("./../build/testserver")
+	tupiCmd = startProc("tupi", "-conf", "./../testdata/tupi-func.conf")
 	time.Sleep(time.Millisecond * 200)
 }
 
 func stopServer() {
-	exec.Command("killall", "testserver").Run()
-	exec.Command("killall", "tupi").Run()
+	stopProc(serverCmd)
+	stopProc(tupiCmd)
+	serverCmd = nil
+	tupiCmd = nil
 }
 
 func startWSServer() {
-	cmd := exec.Command("./../build/testwsserver", "-server")
-	if cmd.Err != nil {
-		panic(cmd.Err.Error())
-	}
-	err := cmd.Start()
-	if err != nil {
-		panic(err.Error())
-	}
-
-	cmd = exec.Command("tupi", "-conf", "./../testdata/tupi-func.conf")
-	if cmd.Err != nil {
-		panic(cmd.Err.Error())
-	}
-	err = cmd.Start()
-	if err != nil {
-		panic(err.Error())
-	}
+	serverCmd = startProc("./../build/testwsserver", "-server")
+	tupiCmd = startProc("tupi", "-conf", "./../testdata/tupi-func.conf")
 	time.Sleep(time.Millisecond * 200)
 }
 
 func stopWSServer() {
-	exec.Command("killall", "testwsserver").Run()
-	exec.Command("killall", "tupi").Run()
+	stopProc(serverCmd)
+	stopProc(tupiCmd)
+	serverCmd = nil
+	tupiCmd = nil
 }
